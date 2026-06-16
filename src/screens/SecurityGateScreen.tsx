@@ -10,22 +10,14 @@ import {
 } from 'react-native';
 import AntDesign from 'react-native-vector-icons/AntDesign';
 import PinPad from '../components/PinPad';
-import {
-  isBiometricAvailable,
-  getSupportedBiometryType,
-  authenticateWithBiometrics,
-  getBiometricLabel,
-  getBiometricIconName,
-  BiometryType,
-} from '../services/biometricService';
+import {getBiometricLabel} from '../services/biometricService';
 import {
   verifyPIN,
   hasPINSet,
   storePIN,
-  getFailureCount,
-  incrementFailureCount,
   resetFailureCount,
 } from '../services/authService';
+import {useBiometricAuth} from '../hooks/useBiometricAuth';
 
 const MAX_FAILURES = 5;
 
@@ -38,13 +30,31 @@ type Mode = 'checking' | 'biometric' | 'pin_verify' | 'pin_setup';
 
 export default function SecurityGateScreen({onPassGate, onForceLogout}: Props) {
   const [mode, setMode] = useState<Mode>('checking');
-  const [biometryType, setBiometryType] = useState<BiometryType>(null);
-  const [failureCount, setFailureCount] = useState(0);
   const [pinError, setPinError] = useState(false);
-  const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [pinSetupStep, setPinSetupStep] = useState<'enter' | 'confirm'>('enter');
   const [firstPinEntry, setFirstPinEntry] = useState('');
+
+  // ─── Biometric hook ───────────────────────────────────────────────────────
+  const {
+    isBiometricSupported,
+    biometryType,
+    biometricIconName,
+    failureCount,
+    attemptsRemaining,
+    isAuthenticating,
+    isInitialising,
+    authenticate,
+    resetFailures,
+  } = useBiometricAuth({
+    maxFailures: MAX_FAILURES,
+    onLockedOut: () =>
+      Alert.alert(
+        'Security Lock',
+        'Too many failed attempts. Logging out for your security.',
+        [{text: 'OK', onPress: onForceLogout}],
+      ),
+  });
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -56,13 +66,13 @@ export default function SecurityGateScreen({onPassGate, onForceLogout}: Props) {
     ]).start();
   }, [fadeAnim, slideAnim]);
 
-  // ─── Bootstrap security gate ───────────────────────────────────────────────
+  // ─── Bootstrap security gate (mode selection only) ────────────────────────
   useEffect(() => {
-    (async () => {
-      const storedFailures = await getFailureCount();
-      setFailureCount(storedFailures);
+    if (isInitialising) {return;}
 
-      if (storedFailures >= MAX_FAILURES) {
+    (async () => {
+      // Already locked out from a previous session?
+      if (failureCount >= MAX_FAILURES) {
         Alert.alert(
           'Account Locked',
           'Too many failed attempts. You have been logged out for security.',
@@ -71,15 +81,9 @@ export default function SecurityGateScreen({onPassGate, onForceLogout}: Props) {
         return;
       }
 
-      const biometricAvailable = await isBiometricAvailable();
-      console.log('biometricAvailable: ',biometricAvailable)
-      const type = await getSupportedBiometryType();
-      console.log('type',type)
-      setBiometryType(type);
-
-      if (biometricAvailable) {
+      if (isBiometricSupported) {
         setMode('biometric');
-        setStatusMessage(`Use ${getBiometricLabel(type)} to unlock`);
+        setStatusMessage(`Use ${getBiometricLabel(biometryType)} to unlock`);
       } else {
         const pinExists = await hasPINSet();
         setMode(pinExists ? 'pin_verify' : 'pin_setup');
@@ -88,46 +92,26 @@ export default function SecurityGateScreen({onPassGate, onForceLogout}: Props) {
 
       animateIn();
     })();
-  }, [animateIn, onForceLogout]);
+  // Run once after the hook finishes initialising
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInitialising]);
 
-  // ─── Handle failure ───────────────────────────────────────────────────────
-  const handleFailure = useCallback(async () => {
-    const newCount = await incrementFailureCount();
-    setFailureCount(newCount);
-    const remaining = MAX_FAILURES - newCount;
-
-    if (newCount >= MAX_FAILURES) {
-      Alert.alert(
-        'Security Lock',
-        'Too many failed attempts. Logging out for your security.',
-        [{text: 'OK', onPress: onForceLogout}],
-      );
-    } else {
+  // ─── Biometric auth via hook ──────────────────────────────────────────────
+  const triggerBiometric = useCallback(async () => {
+    if (isAuthenticating) {return;}
+    const result = await authenticate();
+    if (result === 'success') {
+      onPassGate();
+    } else if (result === 'failed') {
       Alert.alert(
         'Authentication Failed',
-        `Incorrect attempt. ${remaining} ${remaining === 1 ? 'try' : 'tries'} remaining.`,
+        `Incorrect attempt. ${attemptsRemaining - 1} ${
+          attemptsRemaining - 1 === 1 ? 'try' : 'tries'
+        } remaining.`,
       );
     }
-  }, [onForceLogout]);
-
-  // ─── Biometric auth ───────────────────────────────────────────────────────
-  const triggerBiometric = useCallback(async () => {
-    if (loading) {return;}
-    setLoading(true);
-    try {
-      const success = await authenticateWithBiometrics();
-      if (success) {
-        await resetFailureCount();
-        onPassGate();
-      } else {
-        await handleFailure();
-      }
-    } catch {
-      await handleFailure();
-    } finally {
-      setLoading(false);
-    }
-  }, [loading, handleFailure, onPassGate]);
+    // 'locked_out' is handled by onLockedOut callback in the hook
+  }, [isAuthenticating, authenticate, onPassGate, attemptsRemaining]);
 
   // Auto-trigger biometric prompt on entering biometric mode
   useEffect(() => {
@@ -144,15 +128,30 @@ export default function SecurityGateScreen({onPassGate, onForceLogout}: Props) {
       const correct = await verifyPIN(pin);
       if (correct) {
         setPinError(false);
-        await resetFailureCount();
+        await resetFailures();
         onPassGate();
       } else {
         setPinError(true);
         setTimeout(() => setPinError(false), 600);
-        await handleFailure();
+        // Re-use the hook's failure tracking for PIN too
+        const newCount = failureCount + 1;
+        if (newCount >= MAX_FAILURES) {
+          Alert.alert(
+            'Security Lock',
+            'Too many failed attempts. Logging out for your security.',
+            [{text: 'OK', onPress: onForceLogout}],
+          );
+        } else {
+          Alert.alert(
+            'Authentication Failed',
+            `Incorrect PIN. ${MAX_FAILURES - newCount} ${
+              MAX_FAILURES - newCount === 1 ? 'try' : 'tries'
+            } remaining.`,
+          );
+        }
       }
     },
-    [handleFailure, onPassGate],
+    [failureCount, onForceLogout, onPassGate, resetFailures],
   );
 
   // ─── PIN setup ────────────────────────────────────────────────────────────
@@ -199,7 +198,7 @@ export default function SecurityGateScreen({onPassGate, onForceLogout}: Props) {
   }, [fadeAnim, slideAnim]);
 
   // ─── Render ───────────────────────────────────────────────────────────────
-  const failuresRemaining = Math.max(0, MAX_FAILURES - failureCount);
+  const failuresRemaining = attemptsRemaining;
 
   return (
     <View style={styles.container}>
@@ -217,7 +216,7 @@ export default function SecurityGateScreen({onPassGate, onForceLogout}: Props) {
               <AntDesign
                 name={
                   mode === 'biometric'
-                    ? getBiometricIconName(biometryType)
+                    ? biometricIconName
                     : mode === 'pin_setup'
                     ? 'appstore-o'
                     : 'lock'
@@ -245,16 +244,16 @@ export default function SecurityGateScreen({onPassGate, onForceLogout}: Props) {
         {mode === 'biometric' && (
           <View style={styles.biometricSection}>
             <TouchableOpacity
-              style={[styles.biometricButton, loading && styles.biometricButtonActive]}
+              style={[styles.biometricButton, isAuthenticating && styles.biometricButtonActive]}
               onPress={triggerBiometric}
-              disabled={loading}
+              disabled={isAuthenticating}
               activeOpacity={0.8}>
-              {loading ? (
+              {isAuthenticating ? (
                 <ActivityIndicator color="#6366F1" size="large" />
               ) : (
                 <>
                   <AntDesign
-                    name={getBiometricIconName(biometryType)}
+                    name={biometricIconName}
                     size={56}
                     color="#6366F1"
                   />
@@ -285,7 +284,7 @@ export default function SecurityGateScreen({onPassGate, onForceLogout}: Props) {
             <PinPad
               onComplete={mode === 'pin_verify' ? handlePinComplete : handlePinSetup}
               pinLength={6}
-              disabled={loading}
+              disabled={isAuthenticating}
               error={pinError}
             />
           </View>
