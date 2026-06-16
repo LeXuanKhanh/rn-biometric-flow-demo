@@ -1,97 +1,98 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# 🔐 RN Biometric Flow Demo
 
-# Getting Started
+A bare React Native project demonstrating a complete **biometric authentication flow** using `react-native-keychain`.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## Flow Diagram
 
-## Step 1: Start Metro
-
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
-
-To start the Metro dev server, run the following command from the root of your React Native project:
-
-```sh
-# Using npm
-npm start
-
-# OR using Yarn
-yarn start
+```
+App Start ──► Bootstrap
+                │
+    ┌───────────┴──────────────┐
+    │ No refresh token         │ Has refresh token
+    ▼                          ▼
+Login Screen           Security Gate
+                              │
+                    ┌─────────┴─────────┐
+                    │ Biometrics?       │
+               Yes  ▼               No  ▼
+            Face ID / Touch ID     PIN Code
+                    │                   │
+                    └─────────┬─────────┘
+                              │
+                    ┌─────────┴─────────┐
+                    │  Fail > 5?        │
+               Yes  ▼               No  ▼
+            Force Logout       Pass Security Gate
+                                      │
+                              Refresh Token
+                                      │
+                              Authenticated
+                                      │
+                               Home Screen
 ```
 
-## Step 2: Build and run your app
+## Tech Stack
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+| Library | Version | Purpose |
+|---|---|---|
+| react-native | 0.86.0 | Bare framework |
+| react-native-keychain | ^10.0.0 | Secure token + PIN storage |
+| @react-navigation/native | ^7 | Navigation container |
+| @react-navigation/stack | ^7 | Stack navigator |
+| react-native-reanimated | ^4 | Animations |
+| react-native-gesture-handler | ^3 | Gesture support |
+| react-native-safe-area-context | ^5 | Safe area insets |
+| react-native-screens | ^4 | Native screen optimization |
 
-### Android
+## Project Structure
 
-```sh
-# Using npm
-npm run android
-
-# OR using Yarn
-yarn android
 ```
+src/
+├── App.tsx                         # Root app with providers
+├── navigation/
+│   └── RootNavigator.tsx           # State-machine-based navigation
+├── screens/
+│   ├── LoginScreen.tsx             # Email/password login
+│   ├── SecurityGateScreen.tsx      # Biometric or PIN challenge
+│   └── HomeScreen.tsx              # Authenticated home
+├── services/
+│   ├── authService.ts              # Keychain token and PIN operations
+│   └── biometricService.ts        # Biometric availability and auth
+├── components/
+│   ├── PinPad.tsx                  # 6-digit PIN pad component
+│   └── LoadingOverlay.tsx          # Bootstrap loading state
+└── store/
+    └── authStore.tsx               # React Context auth state
+```
+
+## Security Model
+
+- **Refresh tokens** stored in iOS Keychain / Android Keystore via react-native-keychain
+- **PIN** stored securely with WHEN_UNLOCKED_THIS_DEVICE_ONLY access
+- **Biometric failures** tracked persistently 5 failures trigger force logout
+- **Force logout** clears all keychain entries
+
+## Running
 
 ### iOS
-
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
+```bash
+cd ios && pod install && cd ..
+npx react-native run-ios
 ```
 
-Then, and every time you update your native dependencies, run:
-
-```sh
-bundle exec pod install
+### Android
+```bash
+npx react-native run-android
 ```
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+## Demo Credentials
 
-```sh
-# Using npm
-npm run ios
+Any non-empty email + password combination will log you in (mock validation).
 
-# OR using Yarn
-yarn ios
-```
+## iOS Permission
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
+NSFaceIDUsageDescription is set in Info.plist for Face ID.
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
+## Android Permissions
 
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+USE_BIOMETRIC and USE_FINGERPRINT are declared in AndroidManifest.xml.
