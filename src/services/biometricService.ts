@@ -1,29 +1,52 @@
-import * as Keychain from 'react-native-keychain';
+import {
+  isSensorAvailable,
+  simplePrompt,
+  type BiometricSensorInfo,
+} from '@sbaiahmed1/react-native-biometrics';
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+/**
+ * Biometry types as returned by @sbaiahmed1/react-native-biometrics.
+ * 'Biometrics' is the Android generic type (fingerprint / face).
+ */
 export type BiometryType =
   | 'TouchID'
   | 'FaceID'
-  | 'Fingerprint'
-  | 'Face'
-  | 'Iris'
+  | 'Biometrics'
   | null;
 
-// ─── Biometric Availability ─────────────────────────────────────────────────
+// ─── Biometric Availability ──────────────────────────────────────────────────
 
+/**
+ * Returns the biometry type available on this device, or null if none.
+ */
 export async function getSupportedBiometryType(): Promise<BiometryType> {
   try {
-    const biometryType = await Keychain.getSupportedBiometryType();
-    return biometryType as BiometryType;
+    const info: BiometricSensorInfo = await isSensorAvailable();
+    if (
+      info.available &&
+      info.biometryType &&
+      info.biometryType !== 'None' &&
+      info.biometryType !== 'Unknown'
+    ) {
+      return info.biometryType as BiometryType;
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
+/**
+ * Returns true if a biometric sensor is available and enrolled.
+ */
 export async function isBiometricAvailable(): Promise<boolean> {
   const type = await getSupportedBiometryType();
-  console.log('type: ',type)
   return type !== null;
 }
+
+// ─── Labels & Icons ──────────────────────────────────────────────────────────
 
 export function getBiometricLabel(biometryType: BiometryType): string {
   switch (biometryType) {
@@ -31,12 +54,8 @@ export function getBiometricLabel(biometryType: BiometryType): string {
       return 'Face ID';
     case 'TouchID':
       return 'Touch ID';
-    case 'Fingerprint':
+    case 'Biometrics':
       return 'Fingerprint';
-    case 'Face':
-      return 'Face Recognition';
-    case 'Iris':
-      return 'Iris Scan';
     default:
       return 'Biometrics';
   }
@@ -45,13 +64,11 @@ export function getBiometricLabel(biometryType: BiometryType): string {
 export function getBiometricIconName(biometryType: BiometryType): string {
   switch (biometryType) {
     case 'FaceID':
-    case 'Face':
       return 'scan1';
     case 'TouchID':
-    case 'Fingerprint':
       return 'customerservice';
-    case 'Iris':
-      return 'eye';
+    case 'Biometrics':
+      return 'customerservice';
     default:
       return 'lock';
   }
@@ -59,37 +76,20 @@ export function getBiometricIconName(biometryType: BiometryType): string {
 
 // ─── Biometric Authentication ────────────────────────────────────────────────
 
-const BIOMETRIC_MARKER_SERVICE = 'com.rnbiometricflowdemo.biometricMarker';
-
+/**
+ * Triggers the OS biometric prompt via @sbaiahmed1/react-native-biometrics.
+ * Returns true on success, false on failure / cancellation.
+ */
 export async function authenticateWithBiometrics(): Promise<boolean> {
   try {
-    // Store + retrieve with biometrics access control forces the OS prompt
-    await Keychain.setGenericPassword('biometric', 'auth_marker', {
-      service: BIOMETRIC_MARKER_SERVICE,
-      accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_ANY,
-      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-      authenticationPrompt: {
-        title: 'Biometric Authentication',
-        subtitle: 'Authenticate to continue',
-        description: 'Use your biometrics to verify your identity',
-        cancel: 'Use PIN instead',
-      },
-    });
-
-    const result = await Keychain.getGenericPassword({
-      service: BIOMETRIC_MARKER_SERVICE,
-      authenticationPrompt: {
-        title: 'Biometric Authentication',
-        subtitle: 'Authenticate to continue',
-        description: 'Use your biometrics to verify your identity',
-        cancel: 'Use PIN instead',
-      },
-      accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_ANY,
-    });
-
-    return !!result;
+    console.log('authenticateWithBiometrics')
+    const result = await simplePrompt(
+      'Use your biometrics to verify your identity',
+      // biometricStrength can be added here if needed:
+      // { biometricStrength: BiometricStrength.Strong }
+    );
+    return result.success;
   } catch (error: any) {
-    // User cancelled or biometric failed
     console.log('Biometric auth error:', error?.message);
     return false;
   }

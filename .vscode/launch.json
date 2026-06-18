@@ -9,6 +9,9 @@
             "cwd": "${workspaceFolder}",
             "type": "reactnativedirect",
             "request": "attach",
+            "sourceMapPathOverrides": {
+                "/[metro-project]/*": "${workspaceFolder}/*"
+            }
         }
     ]
 }
